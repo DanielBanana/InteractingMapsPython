@@ -1,10 +1,13 @@
 import sys
 import os
 import jax.numpy as jnp
+import polars as pl
 import logging
 import json
 from pathlib import Path
 from datatypes import CalibrationData
+import numpy as np
+
 
 # Configure the logging module
 logging.basicConfig(
@@ -103,19 +106,38 @@ def loadCalibration(jsonPath: str, height: int, width: int):
     """
     with open(jsonPath, "r") as file:
         settings = json.load(file)
-    focalPoint = settings.focalPoint
-    opticalCenter = settings.opticalCenter
-    distortionCoefficients = settings.distortionCoefficients
-    cameraMatrix = jnp.array([
+    focalPoint = settings["focalPoint"]
+    opticalCenter = settings["opticalCenter"]
+    distortionCoefficients = np.array(settings["distortionCoefficients"])
+    cameraMatrix = np.array([
         [focalPoint[0], 0, opticalCenter[0]],
         [0, focalPoint[1], opticalCenter[1]],
         [0, 0, 1]
     ])
-    viewAngles = jnp.array([2*jnp.atan(height/(2 * focalPoint[0])),
-                            2*jnp.atan(width/(2*focalPoint[1]))])
-    calibrationData  = CalibrationData(focalPoint=settings.focalPoint,
+    viewAngles = np.array([2*np.atan(height/(2 * focalPoint[0])),
+                            2*np.atan(width/(2*focalPoint[1]))])
+    calibrationData  = CalibrationData(focalPoint=focalPoint,
                                        cameraMatrix=cameraMatrix,
                                        distortionCoefficients=distortionCoefficients,
                                        viewAngles=viewAngles)
     return calibrationData
 
+def readEvents(filePath, startTime, endTime, maxEvents: int=1000000, height=[0,179], width=[0,239]):
+    lazyDF = pl.scan_csv(filePath, separator=" ").limit(maxEvents)
+    return lazyDF.filter(
+        (pl.col("time") >= startTime) &
+        (pl.col("time") < endTime) &
+        (pl.col("y") >= height[0]) &
+        (pl.col("y") < height[1]) &
+        (pl.col("x") >= width[0]) &
+        (pl.col("x") < width[1])
+        )
+
+if __name__ == "__main__":
+    path = os.path.join("res", "shapes_rotation", "events.txt")
+    events = readEvents(path, 0.0, 1.0, 1000000)
+    print(events.head(10).collect())
+
+    calibrationData = loadCalibration(os.path.join("res",
+                                                   "shapes_rotation",
+                                                   "calib.json"), 180, 240)
