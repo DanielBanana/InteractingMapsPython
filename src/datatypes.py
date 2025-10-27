@@ -83,8 +83,8 @@ class IMUEvent(Event):
     """
     def __init__(self,
                  time:int, 
-                 velocity: jnp.array|np.array|List,
-                 acceleration: jnp.array|np.array|List):
+                 velocity,
+                 acceleration):
         """
         Initialize the IMU event.
 
@@ -110,10 +110,10 @@ class CalibrationData:
     be undistorted.
     """
     def __init__(self,
-                 focalPoint: jnp.array,
-                 cameraMatrix: jnp.array,
-                 distortionCoefficients: jnp.array,
-                 viewAngles: jnp.array):
+                 focalPoint: np.array,
+                 cameraMatrix: np.array,
+                 distortionCoefficients: np.array,
+                 viewAngles: np.array):
         self.focalPoint = focalPoint
         self.cameraMatrix = cameraMatrix
         self.distortionCoeffiecents = distortionCoefficients
