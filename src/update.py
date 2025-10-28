@@ -212,6 +212,60 @@ def vectorDistance(vec1, vec2):
 def intensityStep(temporalGradient):
     pass
 
+def updateF(F, V, G, R, CCM, Cx, Cy, weights, gamma):
+    assert np.isclose(np.sum(weights), 1.0)
+    normG = jnp.linalg.norm(G, ord=2)
+    if (not np.isclose(normG, 0.0, atol=1e-6)):
+        F1 = F - G/normG**2 * (V/normG + np.dot(F, G))
+    else:
+        F1 = 0.0
+    cross = np.cross(R, CCM)
+    F2 = m32(cross, Cx, Cy)
+    
+    return np.clip(weights[0] + F  + weights[1] * F1 + weights[2] * F2, -gamma, gamma)
+
+def updateG(G, V, F, gradI, deltaGradI, gradDiffG, weights, gamma, y, x):
+    assert np.isclose(np.sum(weights), 1.0)
+    normF = jnp.linalg.norm(F, ord=2)
+    if (not np.isclose(normF, 0.0, atol=1e-6)):
+        G1 = G - F/normF**2 * (V/normF + np.dot(G,F))
+    else:
+        G1 = 0.0
+
+    G2 = gradI
+
+    gradDiffG= updateGIDifferenceGradient(
+        G=G,
+        gradI=gradI,
+        GIDifference=deltaGradI,
+        GIDifferenceGradient=gradDiffG,
+        y=y,
+        x=x
+    )
+
+    return np.clip(weights[0] + F  + weights[1] * G1 + weights[2] * G2, -gamma, gamma), gradDiffG
+
+def updateI(I, G, V, gradI, GIDifferenceGradient, minValue, maxValue, neutralValue, decayParameter, weights, y, x):
+    I1 = V
+    valueDifference = I - neutralValue
+    timeDifference = time - decayTimeSurface
+    if valueDifference.ndim > timeDifference.ndim:
+        timeDifference = timeDifference[..., np.newaxis]
+    I2 = valueDifference * np.exp(-timeDifference * decayParameter), -np.abs(valueDifference), np.abs(valueDifference)
+    I3 = (-GIDifferenceGradient[0] - GIDifferenceGradient[1])
+    gradI = updateGradientLocal2D(I, gradI, y, x)
+    return weights[0] * I + weights[1] * I1 + weights[2] * I2 + weights[3] * I3
+
+def updateR(R, F, CCM, Cx, Cy, Iminus, b, oldPoint, weights):
+    newF = m23P(F, Cy, Cx)
+    point = np.cross(CCM, newF)
+    b = b - Iminus @ oldPoint + Iminus @ point
+    oldPoint = point.copy()
+    R1 = np.linalg.solve(A, b)
+
+    return weights[0] * R + weights[1] * R1, b, point
+
+
 if __name__ == "__main__":
     pixelWidth = 8
     pixelHeight = 8
