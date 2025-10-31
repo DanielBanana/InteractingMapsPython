@@ -101,8 +101,8 @@ if __name__ == "__main__":
 
 
     permutation = [0,1,2,3,4,5]
-    randomKey = jax.random.PRNGKey(99)
-    randomKey, subKey1, subKey2 = jax.random.split(randomKey, num=3)
+    # randomKey = jax.random.PRNGKey(99)
+    # randomKey, subKey1, subKey2 = jax.random.split(randomKey, num=3)
 
     # Tensor definitions
     opticalFlow = np.random.uniform(-0.1,0.1,(settings["height"], settings["width"], 2)) 

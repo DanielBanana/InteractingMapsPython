@@ -8,7 +8,7 @@ def undisortFrame(frame, cameraMatrix, distortionParameters):
 def undistortFrames(frames: np.ndarray, cameraMatrix, distortionParameters):
     return np.array(list(map(lambda f,c,d: cv2.undistort(f,c,d), frames, cameraMatrix, distortionParameters)))
 
-def intensit2Image(frame: cv2.typing.MatLike):
+def intensity2Image(frame: cv2.typing.MatLike):
     maxPolarity = 255.0
     minPolarity = 0.0
     frame = np.float32(frame)
@@ -168,7 +168,7 @@ def create_colorwheel(grid_size):
 def create_VIGF(V: np.ndarray, I: np.ndarray, G: np.ndarray, F: np.ndarray, path="VIGF.png", save=False, cutoff=0.1):
     # Convert input matrices to images
     V_img = temporalGradient2Image(V, cutoff)  # Assume V2image is implemented
-    I_img = intensit2Image(I)  # Assume frame2grayscale is implemented
+    I_img = intensity2Image(I)  # Assume frame2grayscale is implemented
     G_img = vectorField2Image(G)  # Assume vector_field2image is implemented
     F_img = vectorField2Image(F)
 
@@ -330,7 +330,7 @@ def saveImage(Image, path="Image.png", Imode=True):
     """
     if Image.ndim == 2:
         if Imode:
-            grayImage = intensit2Image(Image)  # Assume implemented
+            grayImage = intensity2Image(Image)  # Assume implemented
             grayImage = cv2.cvtColor(grayImage, cv2.COLOR_GRAY2BGR)
         else:
             grayImage = temporalGradient2Image(Image, cutoff=0.1)  # Assume implemented

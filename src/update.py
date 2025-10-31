@@ -42,7 +42,7 @@ def getCalibrationMatrix(pixelWidth, pixelHeight, viewAngles, rs):
 
 def setupRUpdate(cameraCalibrationMatrix: Array):
     rows, cols, depth = cameraCalibrationMatrix.shape
-    identity = jnp.identity(3, jnp.float16)
+    identity = np.identity(3)
     points = np.zeros((rows, cols, 3))
     vecB = np.zeros((3))
 
@@ -138,7 +138,7 @@ def updateIV(I, V: float, minValue, maxValue, lr, weightIV, decayTimeSurface, ti
     return I
 
 def updateIG(I, GIDifferenceGradient, lr, weightIG):
-    return (1 - weightIG) * I + lr * weightIG * (-GIDifferenceGradient[0] - GIDifferenceGradient[1])
+    return (1 - weightIG) * I + lr * weightIG * (I - GIDifferenceGradient[0] - GIDifferenceGradient[1])
 
 def contribute(I, V, minValue, maxValue, lr, weightIV):
     I = np.clip(I + weightIV * lr * V, minValue, maxValue)
@@ -212,23 +212,25 @@ def vectorDistance(vec1, vec2):
 def intensityStep(temporalGradient):
     pass
 
-def updateF(F, V, G, R, CCM, Cx, Cy, weights, gamma):
-    assert np.isclose(np.sum(weights), 1.0)
-    normG = jnp.linalg.norm(G, ord=2)
+def updateF(F, V, G, R, CCM, Cx, Cy, weights, gamma, y, x):
+    assert np.isclose(np.sum(weights[0:3]), 1.0)
+    normG = np.linalg.norm(G[y,x], ord=2)
     if (not np.isclose(normG, 0.0, atol=1e-6)):
-        F1 = F - G/normG**2 * (V/normG + np.dot(F, G))
+        F1 = F[y,x] - G[y,x]/normG**2 * (V/normG + np.dot(F[y,x], G[y,x]))
     else:
         F1 = 0.0
     cross = np.cross(R, CCM)
     F2 = m32(cross, Cx, Cy)
+    F = np.clip(weights[0] * F + weights[2] * F2, -gamma, gamma)
+    F[y,x] = np.clip(F[y,x] + weights[1] * F1, -gamma, gamma)
     
-    return np.clip(weights[0] + F  + weights[1] * F1 + weights[2] * F2, -gamma, gamma)
+    return F
 
 def updateG(G, V, F, gradI, deltaGradI, gradDiffG, weights, gamma, y, x):
-    assert np.isclose(np.sum(weights), 1.0)
-    normF = jnp.linalg.norm(F, ord=2)
+    assert np.isclose(np.sum(weights[0:3]), 1.0)
+    normF = jnp.linalg.norm(F[y,x], ord=2)
     if (not np.isclose(normF, 0.0, atol=1e-6)):
-        G1 = G - F/normF**2 * (V/normF + np.dot(G,F))
+        G1 = G[y,x] - F[y,x]/normF**2 * (V/normF + np.dot(G[y,x],F[y,x]))
     else:
         G1 = 0.0
 
@@ -243,24 +245,26 @@ def updateG(G, V, F, gradI, deltaGradI, gradDiffG, weights, gamma, y, x):
         x=x
     )
 
-    return np.clip(weights[0] + F  + weights[1] * G1 + weights[2] * G2, -gamma, gamma), gradDiffG
+    return np.clip(weights[0] * G[y,x] + weights[1] * G1 + weights[2] * G2[y,x], -gamma, gamma), gradDiffG
 
-def updateI(I, G, V, gradI, GIDifferenceGradient, minValue, maxValue, neutralValue, decayParameter, weights, y, x):
-    I1 = V
-    valueDifference = I - neutralValue
-    timeDifference = time - decayTimeSurface
+def updateI(I, V, gradI, GIDifferenceGradient, minValue, maxValue, neutralValue, decayParameter, weights, y, x):
+    assert np.isclose(np.sum(weights[0:4]), 1.0)
+    I1 = I[y,x] + V
+    valueDifference = I[y,x] - neutralValue
+    timeDifference = time - decayTimeSurface[y,x]
     if valueDifference.ndim > timeDifference.ndim:
         timeDifference = timeDifference[..., np.newaxis]
-    I2 = valueDifference * np.exp(-timeDifference * decayParameter), -np.abs(valueDifference), np.abs(valueDifference)
-    I3 = (-GIDifferenceGradient[0] - GIDifferenceGradient[1])
+    I2 = neutralValue + np.clip(valueDifference * np.exp(-timeDifference * decayParameter), -np.abs(valueDifference), np.abs(valueDifference))
+    I3 = (I[y,x] - GIDifferenceGradient[y,x][0] - GIDifferenceGradient[y,x][1])
     gradI = updateGradientLocal2D(I, gradI, y, x)
-    return weights[0] * I + weights[1] * I1 + weights[2] * I2 + weights[3] * I3
+    return weights[0] * I[y,x] + weights[1] * I1 + weights[2] * I2 + weights[3] * I3
 
 def updateR(R, F, CCM, Cx, Cy, Iminus, b, oldPoint, weights):
-    newF = m23P(F, Cy, Cx)
-    point = np.cross(CCM, newF)
-    b = b - Iminus @ oldPoint + Iminus @ point
-    oldPoint = point.copy()
+    assert np.isclose(np.sum(weights[0:2]), 1.0)
+    newF = m23P(F[y,x], Cy[y,x], Cx[y,x])
+    point = np.cross(CCM[y,x], newF)
+    b = b - Iminus[y,x] @ oldPoint[y,x] + Iminus[y,x] @ point
+    oldPoint[y,x] = point.copy()
     R1 = np.linalg.solve(A, b)
 
     return weights[0] * R + weights[1] * R1, b, point
@@ -278,19 +282,19 @@ if __name__ == "__main__":
 
     F = np.random.rand(pixelHeight,pixelWidth,2)
     G = np.random.rand(pixelHeight,pixelWidth,2)
-    I = np.random.rand(pixelHeight,pixelWidth,1)*4 + 128
+    I = np.random.rand(pixelHeight,pixelWidth)*4 + 128
     V = 4
 
-    updateFG(F, V, G, 0, 0, 1, 0.3, 255)
+    y = 2
+    x = 2
+
+    updateFG(F[y,x], V, G[y,x], 1, 0.3, 255)
 
     gradI = np.stack(np.gradient(I, axis=(0,1)), axis=2).squeeze()
     GIDifference = G-gradI
     GIDifferenceGradient_y, GIDifferenceGradient_x = np.gradient(GIDifference, axis=(0,1))
     # from the gradient_x we only need the gradient in x direction and from the gradient_y the gradient in y direction
     GIDifferenceGradient = np.stack((GIDifferenceGradient_y[:,:,1], GIDifferenceGradient_x[:,:,0]), 2)
-
-    G[2,2] = 1
-    gradI[2,2] = 0
 
     updateGIDifferenceGradient(G, gradI, GIDifference, GIDifferenceGradient, y=2, x=2)
 
@@ -302,7 +306,7 @@ if __name__ == "__main__":
     y = 2
     x = 2
     time = decayTimeSurface[y, x] + 1e-3
-    updateIV(I, V, y=y, x=x, minValue=0, maxValue=255, lr=1, weightIV=0.5, decayTimeSurface=decayTimeSurface, time=time, decayParameter=decaParameter, neutralPotential=128)
+    updateIV(I[y,x], V, minValue=0, maxValue=255, lr=1, weightIV=0.5, decayTimeSurface=decayTimeSurface, time=time, decayParameter=decaParameter, neutralPotential=128)
     print(I[2,2])
 
     R = np.random.rand(3)
@@ -313,8 +317,33 @@ if __name__ == "__main__":
 
     m23A(F, Cx, Cy)
 
-    updateRF(R, F, CCM, Cx, Cy, A, b, Iminus, points, lr, weightRF = 0.8, y=y, x=x)
+    updateRF(R, F[y,x], CCM[y,x], Cx[y,x], Cy[y,x], A, b, Iminus[y,x], points[y,x], lr, weightRF = 0.8)
 
     print(R)
     R = updateRImu(R, np.random.rand(3), lr, weightRImu=0.8)
     print(R)
+
+    weightsI = [0.4, 0.3, 0.2, 0.1]
+    weightsR = [0.2, 0.8]
+    weightsFG = [0.5, 0.2, 0.3]
+    decayParameter = 1e2
+
+    # Test updateF
+    print("F:", F[y,x])
+    F_updated = updateF(F, V, G, R, CCM, Cx, Cy, weightsFG, gamma, y, x)
+    print("Updated F:", F_updated[y,x])
+
+    # Test updateG
+    print("G:", G[y,x])
+    G_updated, gradDiffG_updated = updateG(G, V, F, gradI, GIDifference, GIDifferenceGradient, weightsFG, gamma, y, x)
+    print("Updated G:", G_updated)
+
+    # Test updateI
+    print("I:", I[y,x])
+    I_updated = updateI(I, V, gradI, GIDifferenceGradient, 0, 255, 128, decayParameter, weightsI, y, x)
+    print("Updated I:", I_updated)
+
+    # Test updateR
+    print("R:", R)
+    R_updated, b_updated, point_updated = updateR(R, F, CCM, Cx, Cy, Iminus, b, points, weightsR)
+    print("Updated R:", R_updated)
