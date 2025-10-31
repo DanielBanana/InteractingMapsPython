@@ -40,16 +40,7 @@ def getCalibrationMatrix(pixelWidth, pixelHeight, viewAngles, rs):
     
     return cameraCalibrationMatrix, grad[0], grad[1]
 
-def setupRUpdate(cameraCalibrationMatrix: Array):
-    rows, cols, depth = cameraCalibrationMatrix.shape
-    identity = jnp.identity(3, jnp.float16)
-    points = np.zeros((rows, cols, 3))
-    vecB = np.zeros((3))
 
-    vFunc = jax.vmap(jax.vmap(lambda c, i: i - jnp.outer(c, c), in_axes=(0, None)), in_axes=(0, None)) # map over the two first dimensions of the first input (C).
-    vI = vFunc(cameraCalibrationMatrix, identity)
-    matA = jnp.sum(vI, axis=[0,1])
-    return matA, vecB, vI, points
 
 def updateFG(F: NDArray, V: float, G: NDArray, lr: float, weightFG: float, gamma: float=255):
 
@@ -163,15 +154,6 @@ def updateFR(F, CCM, Cx, Cy, R, lr, weightFR, gamma):
     update = m32(cross, Cx, Cy)
     return np.clip((1 - weightFR) * F + weightFR * lr * update, -gamma, gamma)
 
-def updateRF(R, F, CCM, Cx, Cy, A, b, Iminus, oldPoint, lr, weightRF):
-    newF = m23P(F, Cy, Cx)
-    point = np.cross(CCM, newF)
-    b = b - Iminus @ oldPoint + Iminus @ point
-    oldPoint = point.copy()
-
-    solution = np.linalg.solve(A, b)
-    return (1 - weightRF) * R + weightRF * lr * solution, b, oldPoint
-
 def updateRImu(R, rotVelImu, lr, weightRImu):
     return (1 - weightRImu) * R + weightRImu * lr * rotVelImu
 
@@ -211,6 +193,43 @@ def vectorDistance(vec1, vec2):
 
 def intensityStep(temporalGradient):
     pass
+
+def updateFPS(F, P, S, lr, weightFPS, gamma):
+    return np.clip((1 - weightFPS) * F + weightFPS * (P, S), -gamma, gamma)
+
+def updatePDTC(P, D, T, CCM, weightPDTC, lr, gamma):
+    return np.clip((1 - weightPDTC) * P + weightPDTC * -1/D * m32(np.cross(np.cross(T, CCM), CCM)), -gamma, gamma)
+
+def updateDPTC(D, P, T, CCM, weightDPTC, lr, gamma):
+    return np.clip((1 - weightDPTC) * D + weightDPTC * (np.linalg.norm(m32(np.cross(np.cross(T, CCM), CCM)), ord=2) / np.linalg.norm(P, ord=2)))
+
+def updateRF(R, F, CCM, Cx, Cy, A, b, Iminus, oldPoint, lr, weightRF):
+    newF = m23P(F, Cy, Cx)
+    point = np.cross(CCM, newF)
+    b = b - Iminus @ oldPoint + Iminus @ point
+    oldPoint = point.copy()
+    solution = np.linalg.solve(A, b)
+    return (1 - weightRF) * R + weightRF * lr * solution, b, oldPoint
+
+def setupRUpdate(cameraCalibrationMatrix: Array):
+    rows, cols, depth = cameraCalibrationMatrix.shape
+    identity = jnp.identity(3, jnp.float16)
+    points = np.zeros((rows, cols, 3))
+    vecB = np.zeros((3))
+
+    vFunc = jax.vmap(jax.vmap(lambda c, i: i - jnp.outer(c, c), in_axes=(0, None)), in_axes=(0, None)) # map over the two first dimensions of the first input (C).
+    vI = vFunc(cameraCalibrationMatrix, identity)
+    matA = jnp.sum(vI, axis=[0,1])
+    return matA, vecB, vI, points
+
+def updateTDPC(T, D, P, CCM, Cx, Cy, A, b, Iminus, oldPoint, lr, weightTDPC):
+    newPC = m23P(np.cross(CCM, P), Cx, Cy)
+    point = np.cross(CCM, newPC)
+    b = b - Iminus @ oldPoint + Iminus @ point
+    oldPoint = point.copy()
+    solution = np.linalg.solve(A, b)           
+    return (1 - weightTDPC) * R + weightTDPC * lr * solution, b, oldPoint
+
 
 if __name__ == "__main__":
     pixelWidth = 8
